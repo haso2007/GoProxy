@@ -2,6 +2,7 @@ package custom
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -21,11 +22,11 @@ import (
 
 // Manager 订阅管理器
 type Manager struct {
-	storage    *storage.Storage
-	validator  *validator.Validator
-	singbox    *SingBoxProcess
-	stopCh     chan struct{}
-	refreshMu  sync.Mutex // 防止并发刷新
+	storage   *storage.Storage
+	validator *validator.Validator
+	singbox   *SingBoxProcess
+	stopCh    chan struct{}
+	refreshMu sync.Mutex // 防止并发刷新
 }
 
 // NewManager 创建订阅管理器
@@ -260,7 +261,12 @@ func (m *Manager) RefreshSubscription(subID int64) error {
 	for _, node := range directNodes {
 		addr := node.DirectAddress()
 		proto := node.DirectProtocol()
-		m.storage.AddProxyWithSource(addr, proto, "custom", subID)
+		if err := m.storage.AddProxyWithSource(addr, proto, "custom", subID); err != nil {
+			if !errors.Is(err, storage.ErrTemporarilyDeleted) {
+				log.Printf("[custom] 订阅代理入池失败: %s %v", addr, err)
+			}
+			continue
+		}
 		allProxies = append(allProxies, storage.Proxy{Address: addr, Protocol: proto, Source: "custom"})
 	}
 	if len(directNodes) > 0 {
@@ -295,7 +301,12 @@ func (m *Manager) RefreshSubscription(subID int64) error {
 				key := node.NodeKey()
 				if port, ok := portMap[key]; ok {
 					addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-					m.storage.AddProxyWithSource(addr, "socks5", "custom", subID)
+					if err := m.storage.AddProxyWithSource(addr, "socks5", "custom", subID); err != nil {
+						if !errors.Is(err, storage.ErrTemporarilyDeleted) {
+							log.Printf("[custom] 订阅代理入池失败: %s %v", addr, err)
+						}
+						continue
+					}
 					allProxies = append(allProxies, storage.Proxy{Address: addr, Protocol: "socks5", Source: "custom"})
 				}
 			}
@@ -500,10 +511,10 @@ func (m *Manager) GetStatus() map[string]interface{} {
 	subs, _ := m.storage.GetSubscriptions()
 
 	return map[string]interface{}{
-		"singbox_running":   m.singbox.IsRunning(),
-		"singbox_nodes":     m.singbox.GetNodeCount(),
-		"custom_count":      customCount,
-		"disabled_count":    len(disabled),
+		"singbox_running":    m.singbox.IsRunning(),
+		"singbox_nodes":      m.singbox.GetNodeCount(),
+		"custom_count":       customCount,
+		"disabled_count":     len(disabled),
 		"subscription_count": len(subs),
 	}
 }

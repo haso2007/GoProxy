@@ -115,9 +115,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backgr
 
 /* 操作按钮样式 */
 .btn-danger{border:1px solid var(--red);color:var(--red);padding:5px 10px;font-size:9px;text-transform:uppercase;letter-spacing:0.08em;background:var(--bg-card);cursor:pointer;transition:all 0.2s}
-.btn-danger:hover{background:var(--red);color:#000;box-shadow:0 0 10px var(--red)}
+.btn-danger:hover:not(:disabled){background:var(--red);color:#000;box-shadow:0 0 10px var(--red)}
+.btn-danger:disabled{opacity:0.35;cursor:not-allowed}
 .btn-action{border:1px solid var(--border);color:var(--fg-dim);padding:5px 10px;font-size:9px;text-transform:uppercase;letter-spacing:0.08em;background:var(--bg-card);margin-left:6px;cursor:pointer;transition:all 0.2s}
 .btn-action:hover{background:var(--border);color:var(--fg);box-shadow:0 0 8px var(--border)}
+.bulk-actions{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.bulk-actions span{font-size:10px;color:var(--fg-dim);letter-spacing:0.08em}
+.proxy-checkbox{accent-color:var(--green);cursor:pointer}
 
 /* Table */
 table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);border:1px solid var(--border);background:var(--bg-card)}
@@ -234,6 +238,10 @@ tr:hover{background:var(--gray-2);box-shadow:inset 0 0 20px rgba(0,255,65,0.05)}
           </div>
         </div>
         <div class="proxy-content">
+          <div id="bulk-actions" class="admin-only bulk-actions">
+            <button class="btn-danger" id="bulk-delete-btn" onclick="deleteSelectedProxies()" disabled data-i18n="proxy.bulk_delete">批量删除</button>
+            <span id="selected-count">已选择 0 个</span>
+          </div>
           <div id="proxy-table-wrap"><div class="empty" data-i18n="proxy.loading">加载中...</div></div>
         </div>
       </div>
@@ -587,6 +595,7 @@ const i18n = {
     'proxy.filter_country': '出口国家',
     'proxy.loading': '加载中...',
     'proxy.empty': '暂无代理',
+    'proxy.th_select': '选择',
     'proxy.th_grade': '等级',
     'proxy.th_protocol': '协议',
     'proxy.th_address': '地址',
@@ -597,6 +606,8 @@ const i18n = {
     'proxy.th_action': '操作',
     'proxy.btn_delete': '删除',
     'proxy.btn_refresh': '刷新',
+    'proxy.bulk_delete': '批量删除',
+    'proxy.selected_count': '已选择 {0} 个',
     'proxy.copy_success': '已复制',
     'proxy.refresh_started': '刷新已启动',
     'log.title': '系统日志',
@@ -636,6 +647,8 @@ const i18n = {
     'msg.refresh_confirm': '确定刷新所有代理的延迟吗？这可能需要一些时间。',
     'msg.refresh_started': '延迟刷新已启动',
     'msg.delete_confirm': '确定删除代理',
+    'msg.bulk_delete_confirm': '确定删除选中的 {0} 个代理吗？',
+    'msg.bulk_delete_done': '已删除 {0} 个代理',
     'msg.config_saved': '配置保存成功',
     'msg.config_failed': '配置保存失败',
     // 设置弹窗新增
@@ -742,6 +755,7 @@ const i18n = {
     'proxy.filter_country': 'Exit Country',
     'proxy.loading': 'Loading...',
     'proxy.empty': 'No proxies available',
+    'proxy.th_select': 'Select',
     'proxy.th_grade': 'Grade',
     'proxy.th_protocol': 'Protocol',
     'proxy.th_address': 'Address',
@@ -752,6 +766,8 @@ const i18n = {
     'proxy.th_action': 'Action',
     'proxy.btn_delete': 'DEL',
     'proxy.btn_refresh': 'Refresh',
+    'proxy.bulk_delete': 'Bulk Delete',
+    'proxy.selected_count': '{0} selected',
     'proxy.copy_success': 'Copied',
     'proxy.refresh_started': 'Refresh started',
     'log.title': 'System Log',
@@ -791,6 +807,8 @@ const i18n = {
     'msg.refresh_confirm': 'Refresh latency for all proxies? This may take a while.',
     'msg.refresh_started': 'Latency refresh started',
     'msg.delete_confirm': 'Delete proxy',
+    'msg.bulk_delete_confirm': 'Delete {0} selected proxies?',
+    'msg.bulk_delete_done': 'Deleted {0} proxies',
     'msg.config_saved': 'Configuration saved successfully',
     'msg.config_failed': 'Failed to save configuration',
     'config.system_title': 'System Settings',
@@ -921,6 +939,7 @@ if (savedLang) {
 let currentProtocol = '';
 let currentCountry = '';
 let allProxies = [];
+let selectedProxies = new Set();
 let isAdmin = false; // 是否为管理员
 
 async function api(path, opts) {
@@ -946,7 +965,7 @@ function updateUIByRole() {
   // 显示/隐藏管理员专属元素
   document.querySelectorAll('.admin-only').forEach(el => {
     if (isAdmin) {
-      el.style.display = 'block';
+      el.style.display = el.classList.contains('bulk-actions') ? 'flex' : 'block';
     } else {
       el.style.display = 'none';
     }
@@ -986,6 +1005,10 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
 }
 
 function copyToClipboard(text) {
@@ -1060,6 +1083,10 @@ async function loadProxies() {
   if (!proxies) return;
 
   allProxies = proxies;
+  const existing = new Set(proxies.map(p => p.address));
+  selectedProxies.forEach(addr => {
+    if (!existing.has(addr)) selectedProxies.delete(addr);
+  });
   updateCountryOptions();
   filterAndRender();
 }
@@ -1103,12 +1130,69 @@ function setCountryFilter(country) {
   filterAndRender();
 }
 
+function toggleProxySelection(addr, checked) {
+  if (checked) {
+    selectedProxies.add(addr);
+  } else {
+    selectedProxies.delete(addr);
+  }
+  updateBulkDeleteState();
+}
+
+function toggleSelectAllProxies(checked) {
+  document.querySelectorAll('.proxy-row-checkbox').forEach(box => {
+    box.checked = checked;
+    if (checked) {
+      selectedProxies.add(box.value);
+    } else {
+      selectedProxies.delete(box.value);
+    }
+  });
+  updateBulkDeleteState();
+}
+
+function updateBulkDeleteState() {
+  const count = selectedProxies.size;
+  const countEl = document.getElementById('selected-count');
+  const btn = document.getElementById('bulk-delete-btn');
+  if (countEl) countEl.textContent = t('proxy.selected_count').replace('{0}', count);
+  if (btn) btn.disabled = count === 0;
+
+  const boxes = Array.from(document.querySelectorAll('.proxy-row-checkbox'));
+  const selectAll = document.getElementById('select-all-proxies');
+  if (selectAll) {
+    selectAll.checked = boxes.length > 0 && boxes.every(box => selectedProxies.has(box.value));
+  }
+}
+
+async function deleteSelectedProxies() {
+  const addresses = Array.from(selectedProxies);
+  if (addresses.length === 0) return;
+  if (!confirm(t('msg.bulk_delete_confirm').replace('{0}', addresses.length))) return;
+
+  const res = await api('/api/proxy/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({addresses})
+  });
+  if (!res) return;
+
+  const deleted = res.deleted || addresses.length;
+  selectedProxies.clear();
+  showToast(t('msg.bulk_delete_done').replace('{0}', deleted));
+  loadProxies();
+  loadPoolStatus();
+}
+
 function renderProxies(proxies) {
   let html = '';
   if (proxies.length === 0) {
     html = '<div class="empty" data-i18n="proxy.empty">' + t('proxy.empty') + '</div>';
   } else {
     html = '<table><thead><tr>';
+    if (isAdmin) {
+      html += '<th><input class="proxy-checkbox" id="select-all-proxies" type="checkbox" title="' + t('proxy.th_select') + '" onchange="toggleSelectAllProxies(this.checked)"></th>';
+    }
     html += '<th data-i18n="proxy.th_grade">' + t('proxy.th_grade') + '</th>';
     html += '<th data-i18n="proxy.th_protocol">' + t('proxy.th_protocol') + '</th>';
     html += '<th data-i18n="proxy.th_address">' + t('proxy.th_address') + '</th>';
@@ -1128,6 +1212,10 @@ function renderProxies(proxies) {
       
       const rowStyle = p.source === 'custom' ? ' style="border-left:2px solid var(--yellow)"' : '';
       html += '<tr' + rowStyle + '>';
+      if (isAdmin) {
+        const checked = selectedProxies.has(p.address) ? ' checked' : '';
+        html += '<td><input class="proxy-checkbox proxy-row-checkbox" type="checkbox" value="' + escapeHTML(p.address) + '"' + checked + ' onchange="toggleProxySelection(this.value, this.checked)"></td>';
+      }
       html += '<td class="cell-grade grade-' + grade + '">' + (p.quality_grade || 'C') + '</td>';
       html += '<td><span class="badge badge-' + p.protocol + '">' + p.protocol.toUpperCase() + '</span>';
       if (p.source === 'custom') {
@@ -1155,6 +1243,7 @@ function renderProxies(proxies) {
   }
 
   document.getElementById('proxy-table-wrap').innerHTML = html;
+  updateBulkDeleteState();
 }
 
 async function triggerFetch() {
@@ -1173,12 +1262,15 @@ async function refreshLatency() {
 
 async function deleteProxy(addr) {
   if (!confirm(t('msg.delete_confirm') + ' ' + addr + '?')) return;
-  await api('/api/proxy/delete', {
+  const res = await api('/api/proxy/delete', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({address: addr})
   });
+  if (!res) return;
+  selectedProxies.delete(addr);
   loadProxies();
+  loadPoolStatus();
 }
 
 async function loadLogs() {

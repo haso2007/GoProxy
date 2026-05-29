@@ -49,6 +49,7 @@ GoProxy 从公开代理源自动抓取 HTTP/SOCKS5 代理，同时支持导入 C
 ### WebUI 仪表盘
 
 - 免费池 / 订阅池分离展示，实时状态监控
+- 代理集中管理：管理员可多选代理并批量删除；删除后在下次手动「抓取代理」前不会被刷新/后台补池重新加入
 - 订阅管理：添加 URL / 上传文件 / 刷新 / 暂停 / 删除
 - 系统设置：5 种代理模式切换、池子参数、地理过滤
 - 双角色权限：访客只读 + 管理员完全控制
@@ -73,6 +74,20 @@ cp .env.example .env
 vim .env  # 修改密码、认证、地理过滤等
 docker compose up -d
 ```
+
+### Docker 本地源码构建
+
+如果需要在服务器上直接从当前源码构建并部署，可使用 `docker-compose_local.yml`：
+
+```bash
+# 从源码构建本地镜像并启动
+docker compose -f docker-compose_local.yml up --build -d
+
+# 查看日志
+docker compose -f docker-compose_local.yml logs -f
+```
+
+该文件使用当前目录的 `Dockerfile` 构建镜像 `goproxy:local`，默认容器名为 `goproxy-local`，端口仍映射为 `7776-7780`。如果已有线上容器占用这些端口，请先停止旧容器或通过环境变量调整端口。
 
 ### 本地运行
 
@@ -178,6 +193,20 @@ ssh -o ProxyCommand='nc -X 5 -x localhost:7779 %h %p' user@remote-server
 访客可通过顶部「贡献订阅」按钮分享自己的订阅 URL 或配置文件。
 
 ## Docker 部署详解
+
+### 本地源码构建 compose 方式
+
+`docker-compose_local.yml` 适合在服务器上验证当前工作区源码，不拉取远端预构建镜像：
+
+```bash
+docker compose -f docker-compose_local.yml up --build -d
+```
+
+如需指定 sing-box 版本或修改默认端口，可通过环境变量覆盖：
+
+```bash
+SINGBOX_VERSION=1.13.5 WEBUI_PORT=8080 docker compose -f docker-compose_local.yml up --build -d
+```
 
 ### docker run 方式
 

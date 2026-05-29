@@ -2,32 +2,34 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Proxy struct {
-	ID           int64     `json:"id"`
-	Address      string    `json:"address"`
-	Protocol     string    `json:"protocol"`
-	ExitIP       string    `json:"exit_ip"`
-	ExitLocation string    `json:"exit_location"`
-	Latency      int       `json:"latency"`
-	QualityGrade string    `json:"quality_grade"`
-	UseCount     int       `json:"use_count"`
-	SuccessCount int       `json:"success_count"`
-	FailCount    int       `json:"fail_count"`
-	LastUsed     time.Time `json:"last_used"`
-	LastCheck    time.Time `json:"last_check"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	Address        string    `json:"address"`
+	Protocol       string    `json:"protocol"`
+	ExitIP         string    `json:"exit_ip"`
+	ExitLocation   string    `json:"exit_location"`
+	Latency        int       `json:"latency"`
+	QualityGrade   string    `json:"quality_grade"`
+	UseCount       int       `json:"use_count"`
+	SuccessCount   int       `json:"success_count"`
+	FailCount      int       `json:"fail_count"`
+	LastUsed       time.Time `json:"last_used"`
+	LastCheck      time.Time `json:"last_check"`
+	CreatedAt      time.Time `json:"created_at"`
 	Status         string    `json:"status"`
 	Source         string    `json:"source"`          // "free" 或 "custom"
-	SubscriptionID int64    `json:"subscription_id"` // 所属订阅ID（0=免费代理）
+	SubscriptionID int64     `json:"subscription_id"` // 所属订阅ID（0=免费代理）
 }
 
 // Subscription 订阅信息
@@ -55,12 +57,16 @@ type SourceStatus struct {
 	ConsecutiveFails int
 	LastSuccess      time.Time
 	LastFail         time.Time
-	Status           string    // active/degraded/disabled
+	Status           string // active/degraded/disabled
 	DisabledUntil    time.Time
 }
 
+var ErrTemporarilyDeleted = errors.New("temporarily deleted")
+
 type Storage struct {
-	db *sql.DB
+	db                 *sql.DB
+	temporarilyDeleted map[string]struct{}
+	temporarilyMu      sync.RWMutex
 }
 
 func New(dbPath string) (*Storage, error) {
@@ -71,7 +77,10 @@ func New(dbPath string) (*Storage, error) {
 
 	db.SetMaxOpenConns(1) // SQLite 单写
 
-	s := &Storage{db: db}
+	s := &Storage{
+		db:                 db,
+		temporarilyDeleted: make(map[string]struct{}),
+	}
 	if err := s.initSchema(); err != nil {
 		return nil, err
 	}
@@ -244,6 +253,10 @@ func (s *Storage) initSchema() error {
 
 // AddProxy 新增免费代理，已存在则忽略
 func (s *Storage) AddProxy(address, protocol string) error {
+	if s.IsTemporarilyDeleted(address) {
+		return ErrTemporarilyDeleted
+	}
+
 	result, err := s.db.Exec(
 		`INSERT OR IGNORE INTO proxies (address, protocol, source) VALUES (?, ?, 'free')`,
 		address, protocol,
@@ -252,7 +265,7 @@ func (s *Storage) AddProxy(address, protocol string) error {
 		log.Printf("[storage] AddProxy %s error: %v", address, err)
 		return err
 	}
-	
+
 	// 检查是否真的插入了
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
@@ -285,7 +298,7 @@ func (s *Storage) AddProxies(proxies []Proxy) error {
 // GetRandom 随机取一个可用代理（优先选择质量高的）
 func (s *Storage) GetRandom() (*Proxy, error) {
 	rows, err := s.db.Query(
-		`SELECT `+proxyColumns+`
+		`SELECT ` + proxyColumns + `
 		 FROM proxies
 		 WHERE status = 'active' AND fail_count < 3
 		 ORDER BY
@@ -501,6 +514,42 @@ func (s *Storage) GetLowestLatencyByProtocolExcludeFiltered(protocol string, exc
 func (s *Storage) Delete(address string) error {
 	_, err := s.db.Exec(`DELETE FROM proxies WHERE address = ?`, address)
 	return err
+}
+
+func (s *Storage) MarkTemporarilyDeleted(addresses []string) int {
+	s.temporarilyMu.Lock()
+	defer s.temporarilyMu.Unlock()
+
+	added := 0
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		if _, ok := s.temporarilyDeleted[address]; ok {
+			continue
+		}
+		s.temporarilyDeleted[address] = struct{}{}
+		added++
+	}
+	return added
+}
+
+func (s *Storage) ClearTemporarilyDeleted() int {
+	s.temporarilyMu.Lock()
+	defer s.temporarilyMu.Unlock()
+
+	cleared := len(s.temporarilyDeleted)
+	s.temporarilyDeleted = make(map[string]struct{})
+	return cleared
+}
+
+func (s *Storage) IsTemporarilyDeleted(address string) bool {
+	s.temporarilyMu.RLock()
+	defer s.temporarilyMu.RUnlock()
+
+	_, ok := s.temporarilyDeleted[address]
+	return ok
 }
 
 // IncrFail 增加失败次数
@@ -883,6 +932,10 @@ func (s *Storage) GetByProtocol(protocol string) ([]Proxy, error) {
 
 // AddProxyWithSource 新增代理并指定来源和订阅ID
 func (s *Storage) AddProxyWithSource(address, protocol, source string, subscriptionID ...int64) error {
+	if s.IsTemporarilyDeleted(address) {
+		return ErrTemporarilyDeleted
+	}
+
 	subID := int64(0)
 	if len(subscriptionID) > 0 {
 		subID = subscriptionID[0]
@@ -933,7 +986,7 @@ func (s *Storage) EnableProxy(address string) error {
 // GetDisabledCustomProxies 获取所有被禁用的订阅代理
 func (s *Storage) GetDisabledCustomProxies() ([]Proxy, error) {
 	rows, err := s.db.Query(
-		`SELECT `+proxyColumns+`
+		`SELECT ` + proxyColumns + `
 		 FROM proxies
 		 WHERE source = 'custom' AND status = 'disabled'`,
 	)
@@ -1096,7 +1149,7 @@ func (s *Storage) GetSubscriptions() ([]Subscription, error) {
 // GetSubscription 获取单个订阅
 func (s *Storage) GetSubscription(id int64) (*Subscription, error) {
 	rows, err := s.db.Query(
-		`SELECT ` + subColumns + `
+		`SELECT `+subColumns+`
 		 FROM subscriptions WHERE id = ?`, id,
 	)
 	if err != nil {

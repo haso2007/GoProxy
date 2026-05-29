@@ -140,6 +140,10 @@ func (m *Manager) NeedsFetchQuick(status *PoolStatus) bool {
 
 // TryAddProxy 尝试将代理加入池子
 func (m *Manager) TryAddProxy(p storage.Proxy) (bool, string) {
+	if m.storage.IsTemporarilyDeleted(p.Address) {
+		return false, "temporarily_deleted"
+	}
+
 	// 订阅代理直接入池，不受 slot 限制
 	if p.Source == "custom" {
 		if err := m.storage.AddProxyWithSource(p.Address, p.Protocol, "custom"); err != nil {
