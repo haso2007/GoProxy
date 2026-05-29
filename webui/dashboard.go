@@ -124,6 +124,9 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backgr
 .proxy-search{margin-left:auto;min-width:280px;padding:6px 10px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);font-family:var(--mono);font-size:10px;outline:none;letter-spacing:0.04em}
 .proxy-search:focus{border-color:var(--border-heavy);box-shadow:0 0 10px var(--border-heavy)}
 .proxy-search::placeholder{color:var(--gray-5)}
+.btn-pause{border:1px solid var(--border);color:var(--fg-dim);padding:6px 10px;font-size:9px;text-transform:uppercase;letter-spacing:0.08em;background:var(--bg-card);cursor:pointer;transition:all 0.2s;font-family:var(--mono)}
+.btn-pause:hover{background:var(--border);color:var(--fg);box-shadow:0 0 8px var(--border)}
+.btn-pause.paused{border-color:var(--yellow);color:var(--yellow);box-shadow:0 0 8px rgba(255,255,0,0.25)}
 .proxy-checkbox{accent-color:var(--green);cursor:pointer}
 
 /* Table */
@@ -245,6 +248,7 @@ tr:hover{background:var(--gray-2);box-shadow:inset 0 0 20px rgba(0,255,65,0.05)}
             <button class="btn-danger" id="bulk-delete-btn" onclick="deleteSelectedProxies()" disabled data-i18n="proxy.bulk_delete">批量删除</button>
             <span id="selected-count">已选择 0 个</span>
             <input class="proxy-search" id="proxy-search" type="search" placeholder="搜索代理 / IP / 位置" oninput="setProxySearch(this.value)">
+            <button class="btn-pause" id="proxy-refresh-toggle" onclick="toggleProxyAutoRefresh()" data-i18n="proxy.pause_refresh">暂停刷新</button>
           </div>
           <div id="proxy-table-wrap"><div class="empty" data-i18n="proxy.loading">加载中...</div></div>
         </div>
@@ -613,6 +617,8 @@ const i18n = {
     'proxy.bulk_delete': '批量删除',
     'proxy.selected_count': '已选择 {0} 个',
     'proxy.search_placeholder': '搜索代理 / IP / 位置',
+    'proxy.pause_refresh': '暂停刷新',
+    'proxy.resume_refresh': '恢复刷新',
     'proxy.copy_success': '已复制',
     'proxy.refresh_started': '刷新已启动',
     'log.title': '系统日志',
@@ -774,6 +780,8 @@ const i18n = {
     'proxy.bulk_delete': 'Bulk Delete',
     'proxy.selected_count': '{0} selected',
     'proxy.search_placeholder': 'Search proxy / IP / location',
+    'proxy.pause_refresh': 'Pause Refresh',
+    'proxy.resume_refresh': 'Resume Refresh',
     'proxy.copy_success': 'Copied',
     'proxy.refresh_started': 'Refresh started',
     'log.title': 'System Log',
@@ -922,6 +930,7 @@ function updateI18n() {
   if (countryLabel) countryLabel.textContent = t('proxy.filter_country');
   const searchInput = document.getElementById('proxy-search');
   if (searchInput) searchInput.placeholder = t('proxy.search_placeholder');
+  updateProxyAutoRefreshButton();
 }
 
 function toggleLang() {
@@ -947,6 +956,7 @@ if (savedLang) {
 let currentProtocol = '';
 let currentCountry = '';
 let proxySearchQuery = '';
+let proxyAutoRefreshPaused = false;
 let allProxies = [];
 let selectedProxies = new Set();
 let isAdmin = false; // 是否为管理员
@@ -1149,6 +1159,21 @@ function setProxySearch(value) {
   filterAndRender();
 }
 
+function updateProxyAutoRefreshButton() {
+  const btn = document.getElementById('proxy-refresh-toggle');
+  if (!btn) return;
+  btn.textContent = proxyAutoRefreshPaused ? t('proxy.resume_refresh') : t('proxy.pause_refresh');
+  btn.classList.toggle('paused', proxyAutoRefreshPaused);
+}
+
+function toggleProxyAutoRefresh() {
+  proxyAutoRefreshPaused = !proxyAutoRefreshPaused;
+  updateProxyAutoRefreshButton();
+  if (!proxyAutoRefreshPaused) {
+    loadProxies();
+  }
+}
+
 function setProtocolFilter(protocol) {
   currentProtocol = protocol;
   loadProxies();
@@ -1326,7 +1351,9 @@ async function loadLogs() {
   logCountdown = 5;
   
   // 同时刷新代理列表
-  loadProxies();
+  if (!proxyAutoRefreshPaused) {
+    loadProxies();
+  }
 }
 
 async function openSettings() {
