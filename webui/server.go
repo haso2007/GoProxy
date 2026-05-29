@@ -45,7 +45,7 @@ func validSession(r *http.Request) bool {
 	return ok && time.Now().Before(expiry)
 }
 
-type FetchTrigger func()
+type FetchTrigger func(force bool)
 
 type Server struct {
 	storage       *storage.Storage
@@ -340,7 +340,7 @@ func (s *Server) apiFetch(w http.ResponseWriter, r *http.Request) {
 	if cleared > 0 {
 		log.Printf("[webui] 手动抓取代理，已清空临时删除屏蔽: %d 个", cleared)
 	}
-	go s.fetchTrigger()
+	go s.fetchTrigger(true)
 	jsonOK(w, map[string]string{"status": "fetch started"})
 }
 

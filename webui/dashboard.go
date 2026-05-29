@@ -121,6 +121,9 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backgr
 .btn-action:hover{background:var(--border);color:var(--fg);box-shadow:0 0 8px var(--border)}
 .bulk-actions{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
 .bulk-actions span{font-size:10px;color:var(--fg-dim);letter-spacing:0.08em}
+.proxy-search{margin-left:auto;min-width:280px;padding:6px 10px;border:1px solid var(--border);background:var(--bg-card);color:var(--fg);font-family:var(--mono);font-size:10px;outline:none;letter-spacing:0.04em}
+.proxy-search:focus{border-color:var(--border-heavy);box-shadow:0 0 10px var(--border-heavy)}
+.proxy-search::placeholder{color:var(--gray-5)}
 .proxy-checkbox{accent-color:var(--green);cursor:pointer}
 
 /* Table */
@@ -241,6 +244,7 @@ tr:hover{background:var(--gray-2);box-shadow:inset 0 0 20px rgba(0,255,65,0.05)}
           <div id="bulk-actions" class="admin-only bulk-actions">
             <button class="btn-danger" id="bulk-delete-btn" onclick="deleteSelectedProxies()" disabled data-i18n="proxy.bulk_delete">批量删除</button>
             <span id="selected-count">已选择 0 个</span>
+            <input class="proxy-search" id="proxy-search" type="search" placeholder="搜索代理 / IP / 位置" oninput="setProxySearch(this.value)">
           </div>
           <div id="proxy-table-wrap"><div class="empty" data-i18n="proxy.loading">加载中...</div></div>
         </div>
@@ -608,6 +612,7 @@ const i18n = {
     'proxy.btn_refresh': '刷新',
     'proxy.bulk_delete': '批量删除',
     'proxy.selected_count': '已选择 {0} 个',
+    'proxy.search_placeholder': '搜索代理 / IP / 位置',
     'proxy.copy_success': '已复制',
     'proxy.refresh_started': '刷新已启动',
     'log.title': '系统日志',
@@ -768,6 +773,7 @@ const i18n = {
     'proxy.btn_refresh': 'Refresh',
     'proxy.bulk_delete': 'Bulk Delete',
     'proxy.selected_count': '{0} selected',
+    'proxy.search_placeholder': 'Search proxy / IP / location',
     'proxy.copy_success': 'Copied',
     'proxy.refresh_started': 'Refresh started',
     'log.title': 'System Log',
@@ -914,6 +920,8 @@ function updateI18n() {
   if (protocolLabel) protocolLabel.textContent = t('proxy.filter_protocol');
   const countryLabel = document.getElementById('country-filter-label');
   if (countryLabel) countryLabel.textContent = t('proxy.filter_country');
+  const searchInput = document.getElementById('proxy-search');
+  if (searchInput) searchInput.placeholder = t('proxy.search_placeholder');
 }
 
 function toggleLang() {
@@ -938,6 +946,7 @@ if (savedLang) {
 
 let currentProtocol = '';
 let currentCountry = '';
+let proxySearchQuery = '';
 let allProxies = [];
 let selectedProxies = new Set();
 let isAdmin = false; // 是否为管理员
@@ -1117,7 +1126,27 @@ function filterAndRender() {
   if (currentCountry) {
     filtered = filtered.filter(p => p.exit_location && p.exit_location.startsWith(currentCountry + ' '));
   }
+  const query = proxySearchQuery.trim().toLowerCase();
+  if (query) {
+    filtered = filtered.filter(p => {
+      const subName = p.subscription_id ? (subNameMap[p.subscription_id] || '') : '';
+      return [
+        p.address,
+        p.protocol,
+        p.exit_ip,
+        p.exit_location,
+        p.quality_grade,
+        p.source,
+        subName
+      ].some(value => String(value || '').toLowerCase().includes(query));
+    });
+  }
   renderProxies(filtered);
+}
+
+function setProxySearch(value) {
+  proxySearchQuery = value;
+  filterAndRender();
 }
 
 function setProtocolFilter(protocol) {
