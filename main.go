@@ -174,6 +174,11 @@ func smartFetchAndFill(fetch *fetcher.Fetcher, validate *validator.Validator, st
 		status.State, status.HTTP, status.HTTPSlots, status.SOCKS5, status.SOCKS5Slots,
 		status.Total, config.Get().PoolMaxSize)
 
+	if store.IsManualSelectionMode() && !force {
+		log.Println("[main] 手动筛选模式已启用，后台补池暂停；点击抓取代理后恢复")
+		return
+	}
+
 	// 判断是否需要抓取
 	needFetch, mode, preferredProtocol := poolMgr.NeedsFetch(status)
 	if !needFetch && !force {

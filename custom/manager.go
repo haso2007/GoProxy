@@ -170,6 +170,11 @@ func (m *Manager) probeLoop() {
 
 // probeDisabled 探测被禁用的订阅代理
 func (m *Manager) probeDisabled() {
+	if m.storage.IsManualSelectionMode() {
+		log.Println("[custom] 手动筛选模式已启用，跳过禁用代理探测")
+		return
+	}
+
 	disabled, err := m.storage.GetDisabledCustomProxies()
 	if err != nil || len(disabled) == 0 {
 		return
@@ -217,6 +222,10 @@ func (m *Manager) RefreshSubscription(subID int64) error {
 	if err != nil {
 		return fmt.Errorf("获取订阅失败: %w", err)
 	}
+	if m.storage.IsManualSelectionMode() {
+		log.Printf("[custom] 手动筛选模式已启用，跳过订阅 [%s] 刷新", sub.Name)
+		return nil
+	}
 
 	// 获取订阅内容
 	data, err := m.fetchSubscriptionData(sub)
@@ -262,7 +271,7 @@ func (m *Manager) RefreshSubscription(subID int64) error {
 		addr := node.DirectAddress()
 		proto := node.DirectProtocol()
 		if err := m.storage.AddProxyWithSource(addr, proto, "custom", subID); err != nil {
-			if !errors.Is(err, storage.ErrTemporarilyDeleted) {
+			if !errors.Is(err, storage.ErrTemporarilyDeleted) && !errors.Is(err, storage.ErrManualSelectionMode) {
 				log.Printf("[custom] 订阅代理入池失败: %s %v", addr, err)
 			}
 			continue
@@ -302,7 +311,7 @@ func (m *Manager) RefreshSubscription(subID int64) error {
 				if port, ok := portMap[key]; ok {
 					addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 					if err := m.storage.AddProxyWithSource(addr, "socks5", "custom", subID); err != nil {
-						if !errors.Is(err, storage.ErrTemporarilyDeleted) {
+						if !errors.Is(err, storage.ErrTemporarilyDeleted) && !errors.Is(err, storage.ErrManualSelectionMode) {
 							log.Printf("[custom] 订阅代理入池失败: %s %v", addr, err)
 						}
 						continue

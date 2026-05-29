@@ -42,6 +42,11 @@ func (o *Optimizer) RunOnce() {
 		return
 	}
 
+	if o.storage.IsManualSelectionMode() {
+		log.Println("[optimize] 手动筛选模式已启用，跳过优化")
+		return
+	}
+
 	// 只有健康状态才执行优化
 	if status.State != "healthy" {
 		log.Printf("[optimize] 池子状态 %s，跳过优化", status.State)

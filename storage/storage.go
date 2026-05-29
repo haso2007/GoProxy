@@ -61,7 +61,10 @@ type SourceStatus struct {
 	DisabledUntil    time.Time
 }
 
-var ErrTemporarilyDeleted = errors.New("temporarily deleted")
+var (
+	ErrTemporarilyDeleted  = errors.New("temporarily deleted")
+	ErrManualSelectionMode = errors.New("manual selection mode active")
+)
 
 type Storage struct {
 	db                 *sql.DB
@@ -255,6 +258,9 @@ func (s *Storage) initSchema() error {
 func (s *Storage) AddProxy(address, protocol string) error {
 	if s.IsTemporarilyDeleted(address) {
 		return ErrTemporarilyDeleted
+	}
+	if s.IsManualSelectionMode() && !s.ProxyExists(address) {
+		return ErrManualSelectionMode
 	}
 
 	result, err := s.db.Exec(
@@ -514,6 +520,20 @@ func (s *Storage) GetLowestLatencyByProtocolExcludeFiltered(protocol string, exc
 func (s *Storage) Delete(address string) error {
 	_, err := s.db.Exec(`DELETE FROM proxies WHERE address = ?`, address)
 	return err
+}
+
+func (s *Storage) ProxyExists(address string) bool {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM proxies WHERE address = ?`, address).Scan(&count); err != nil {
+		return false
+	}
+	return count > 0
+}
+
+func (s *Storage) IsManualSelectionMode() bool {
+	s.temporarilyMu.RLock()
+	defer s.temporarilyMu.RUnlock()
+	return len(s.temporarilyDeleted) > 0
 }
 
 func (s *Storage) MarkTemporarilyDeleted(addresses []string) int {
@@ -934,6 +954,9 @@ func (s *Storage) GetByProtocol(protocol string) ([]Proxy, error) {
 func (s *Storage) AddProxyWithSource(address, protocol, source string, subscriptionID ...int64) error {
 	if s.IsTemporarilyDeleted(address) {
 		return ErrTemporarilyDeleted
+	}
+	if s.IsManualSelectionMode() && !s.ProxyExists(address) {
+		return ErrManualSelectionMode
 	}
 
 	subID := int64(0)

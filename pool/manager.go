@@ -143,6 +143,9 @@ func (m *Manager) TryAddProxy(p storage.Proxy) (bool, string) {
 	if m.storage.IsTemporarilyDeleted(p.Address) {
 		return false, "temporarily_deleted"
 	}
+	if m.storage.IsManualSelectionMode() {
+		return false, "manual_selection_mode"
+	}
 
 	// 订阅代理直接入池，不受 slot 限制
 	if p.Source == "custom" {
